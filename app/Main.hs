@@ -21,7 +21,7 @@ import Network.Wai.Middleware.RequestLogger
 import Network.Wai.Parse
 import Prelude.Compat
 import System.FilePath ((</>))
-import Text.Pandoc (Pandoc, Reader (ByteStringReader, TextReader), ReaderOptions, Writer (ByteStringWriter, TextWriter), WriterOptions, def, readDocx, readMarkdown, runPure, writeDocx, writeHtml5, writeHtml5String, writeMarkdown)
+import Text.Pandoc (Pandoc, Reader (ByteStringReader, TextReader), ReaderOptions, Writer (ByteStringWriter, TextWriter), WriterOptions, def, readDocx, readHtml, readMarkdown, runPure, writeDocx, writeHtml5, writeHtml5String, writeMarkdown)
 import Text.Pandoc.Class (PandocMonad)
 import Web.Scotty
 import Prelude ()
@@ -71,23 +71,33 @@ convert fromCt toCt content = case (reader, writer) of
   (Nothing, _) -> MissingReader
   (_, Nothing) -> MissingWriter
   (Just read, Just write) ->
-     case tryConvert read write content of
-          Left x -> Failure $ show x
-          Right doc -> Success $ LB.toStrict doc
+    case tryConvert read write content of
+      Left x -> Failure $ show x
+      Right doc -> Success $ LB.toStrict doc
   where
     reader = getReader fromCt def
     writer = getWriter toCt def
     tryConvert read write content = runPure $ read content >>= write
 
 getReader :: (IsString a, PandocMonad m, Eq a) => a -> ReaderOptions -> Maybe (BS.ByteString -> m Pandoc)
-getReader "text/docx" opts = Just $ readDocx opts . LB.fromStrict
-getReader "application/vnd.openxmlformats-officedocument.wordprocessingml.document" opts = Just $ readDocx opts . LB.fromStrict
-getReader "text/markdown" opts = Just $ readMarkdown opts . T.decodeUtf8
-getReader _ _ = Nothing
+getReader ct opts = ($ opts) <$> reader
+  where
+    reader = case ct of
+      "text/docx" -> pure $ mkBSReader readDocx
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> pure $ mkBSReader readDocx
+      "text/markdown" -> pure $ mkTextReader readMarkdown
+      "text/html" -> pure $ mkTextReader readHtml
+      _ -> Nothing
+    mkTextReader f opts = f opts . T.decodeUtf8
+    mkBSReader f opts = f opts . LB.fromStrict
 
 getWriter :: (PandocMonad m, IsString a, Eq a) => a -> WriterOptions -> Maybe (Pandoc -> m LB.ByteString)
-getWriter "text/docx" opts = pure $ writeDocx opts
-getWriter "application/vnd.openxmlformats-officedocument.wordprocessingml.document" opts = pure $ writeDocx opts
-getWriter "text/html" opts = pure (\p -> LB.encodeUtf8 . LT.fromStrict <$> writeHtml5String opts p)
-getWriter "text/markdown" opts = pure (\p -> LB.encodeUtf8 . LT.fromStrict <$> writeMarkdown opts p)
-getWriter _ _ = Nothing
+getWriter ct opts = ($ opts) <$> writer
+  where
+    writer = case ct of
+      "text/docx" -> pure writeDocx
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> pure writeDocx
+      "text/html" -> pure $ mkTextWriter writeHtml5String
+      "text/markdown" -> pure $ mkTextWriter writeMarkdown
+      _ -> Nothing
+    mkTextWriter f opts p = LB.encodeUtf8 . LT.fromStrict <$> f opts p
