@@ -2,26 +2,18 @@
 
 module Main (main) where
 
-import Control.Monad (forM_)
-import Control.Monad.IO.Class
-import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as LB
 import Data.String (IsString)
-import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as LT
-import qualified Data.Text.Lazy.Builder as B
-import qualified Data.Text.Lazy.Encoding as BS
 import qualified Data.Text.Lazy.Encoding as LB
 import qualified Data.Text.Lazy.Encoding as LT
 import Network.HTTP.Types
 import Network.Wai.Middleware.RequestLogger
 import Network.Wai.Parse
 import Prelude.Compat
-import System.FilePath ((</>))
-import Text.Pandoc (Pandoc, Reader (ByteStringReader, TextReader), ReaderOptions, Writer (ByteStringWriter, TextWriter), WriterOptions, def, readDocx, readHtml, readMarkdown, runPure, writeDocx, writeHtml5, writeHtml5String, writeMarkdown)
+import Text.Pandoc (Pandoc, ReaderOptions, WriterOptions, def, readDocx, readHtml, readMarkdown, runPure, writeDocx, writeHtml5String, writeMarkdown)
 import Text.Pandoc.Class (PandocMonad)
 import Web.Scotty
 import Prelude ()
@@ -32,7 +24,7 @@ main = scotty 3000 $ do
 
   post "/convert" $ do
     fs <- files
-    let [(fName, fileInfo)] = fs
+    let [(_, fileInfo)] = fs
 
     toContentType <- header "Accept"
     let fromContentType = (LT.decodeUtf8 . LB.fromStrict) $ fileContentType fileInfo
@@ -66,18 +58,18 @@ data ConversionResult
   | Success BS.ByteString
 
 convert :: (IsString a, Eq a, IsString b, Eq b) => a -> b -> BS.ByteString -> ConversionResult
-convert fromCt toCt content = case (reader, writer) of
+convert fromCt toCt content = case (maybeReader, maybeWriter) of
   (Nothing, Nothing) -> MissingBoth
   (Nothing, _) -> MissingReader
   (_, Nothing) -> MissingWriter
-  (Just read, Just write) ->
-    case tryConvert read write content of
+  (Just reader, Just writer) ->
+    case tryConvert reader writer content of
       Left x -> Failure $ show x
       Right doc -> Success $ LB.toStrict doc
   where
-    reader = getReader fromCt def
-    writer = getWriter toCt def
-    tryConvert read write content = runPure $ read content >>= write
+    maybeReader = getReader fromCt def
+    maybeWriter = getWriter toCt def
+    tryConvert reader' writer' content' = runPure $ reader' content' >>= writer'
 
 getReader :: (IsString a, PandocMonad m, Eq a) => a -> ReaderOptions -> Maybe (BS.ByteString -> m Pandoc)
 getReader ct opts = ($ opts) <$> reader
@@ -88,8 +80,8 @@ getReader ct opts = ($ opts) <$> reader
       "text/markdown" -> pure $ mkTextReader readMarkdown
       "text/html" -> pure $ mkTextReader readHtml
       _ -> Nothing
-    mkTextReader f opts = f opts . T.decodeUtf8
-    mkBSReader f opts = f opts . LB.fromStrict
+    mkTextReader f opts' = f opts' . T.decodeUtf8
+    mkBSReader f opts' = f opts' . LB.fromStrict
 
 getWriter :: (PandocMonad m, IsString a, Eq a) => a -> WriterOptions -> Maybe (Pandoc -> m LB.ByteString)
 getWriter ct opts = ($ opts) <$> writer
@@ -100,4 +92,4 @@ getWriter ct opts = ($ opts) <$> writer
       "text/html" -> pure $ mkTextWriter writeHtml5String
       "text/markdown" -> pure $ mkTextWriter writeMarkdown
       _ -> Nothing
-    mkTextWriter f opts p = LB.encodeUtf8 . LT.fromStrict <$> f opts p
+    mkTextWriter f opts' p = LB.encodeUtf8 . LT.fromStrict <$> f opts' p
