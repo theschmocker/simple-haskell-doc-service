@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import Control.Monad (forM_)
 import Control.Monad.IO.Class
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS
@@ -17,18 +18,66 @@ import qualified Data.Text.Lazy.Encoding as LB
 import qualified Data.Text.Lazy.Encoding as LT
 import Network.HTTP.Types
 import Network.Wai.Middleware.RequestLogger
-import Network.Wai.Middleware.Static
 import Network.Wai.Parse
 import Prelude.Compat
 import System.FilePath ((</>))
-import Text.Blaze.Html.Renderer.Text (renderHtml)
-import qualified Text.Blaze.Html5 as H
-import Text.Blaze.Html5.Attributes
 import Text.Pandoc (Pandoc, Reader (ByteStringReader, TextReader), ReaderOptions, Writer (ByteStringWriter, TextWriter), WriterOptions, def, readDocx, readMarkdown, runPure, writeDocx, writeHtml5, writeHtml5String, writeMarkdown)
 import Text.Pandoc.Class (PandocMonad)
 import Web.Scotty
 import Prelude ()
-import Control.Monad (forM_)
+
+main :: IO ()
+main = scotty 3000 $ do
+  middleware logStdoutDev
+
+  post "/convert" $ do
+    fs <- files
+    let [(fName, fileInfo)] = fs
+
+    toContentType <- header "Accept"
+    let fromContentType = (LT.decodeUtf8 . LB.fromStrict) $ fileContentType fileInfo
+
+    case toContentType of
+      Nothing -> do
+        status badRequest400
+        text "Missing \"Accept\" header"
+      Just ct -> case convert fromContentType ct (LB.toStrict $ fileContent fileInfo) of
+        MissingReader -> do
+          status badRequest400
+          text $ "Cannot convert from type: " <> fromContentType
+        MissingWriter -> do
+          status badRequest400
+          text $ "Cannot convert to type: " <> ct
+        MissingBoth -> do
+          status badRequest400
+          text $ "Cannot convert files from \"" <> fromContentType <> "\" to \"" <> ct <> "\""
+        Failure err -> do
+          status badRequest400
+          text $ "Conversion failed: " <> LT.pack err
+        Success contents -> do
+          setHeader "Content-Type" ct
+          raw $ LB.fromStrict contents
+
+data ConversionResult
+  = MissingReader
+  | MissingWriter
+  | MissingBoth
+  | Failure String
+  | Success BS.ByteString
+
+convert :: (IsString a, Eq a, IsString b, Eq b) => a -> b -> BS.ByteString -> ConversionResult
+convert fromCt toCt content = case (reader, writer) of
+  (Nothing, Nothing) -> MissingBoth
+  (Nothing, _) -> MissingReader
+  (_, Nothing) -> MissingWriter
+  (Just read, Just write) ->
+     case tryConvert read write content of
+          Left x -> Failure $ show x
+          Right doc -> Success $ LB.toStrict doc
+  where
+    reader = getReader fromCt def
+    writer = getWriter toCt def
+    tryConvert read write content = runPure $ read content >>= write
 
 getReader :: (IsString a, PandocMonad m, Eq a) => a -> ReaderOptions -> Maybe (BS.ByteString -> m Pandoc)
 getReader "text/docx" opts = Just $ readDocx opts . LB.fromStrict
@@ -42,88 +91,3 @@ getWriter "application/vnd.openxmlformats-officedocument.wordprocessingml.docume
 getWriter "text/html" opts = pure (\p -> LB.encodeUtf8 . LT.fromStrict <$> writeHtml5String opts p)
 getWriter "text/markdown" opts = pure (\p -> LB.encodeUtf8 . LT.fromStrict <$> writeMarkdown opts p)
 getWriter _ _ = Nothing
-
-main :: IO ()
-main = scotty 3000 $ do
-  middleware logStdoutDev
-  middleware $ staticPolicy (noDots >-> addBase "uploads")
-
-  get "/" $ do
-    html $
-      renderHtml $
-        H.html $ do
-          H.body $ do
-            H.form H.! method "post" H.! enctype "multipart/form-data" H.! action "/upload" $ do
-              H.input H.! type_ "file" H.! name "foofile"
-              H.br
-              H.input H.! type_ "submit"
-
-  get "/filetype" $ do
-    html $
-      renderHtml $
-        H.html $ do
-          H.body $ do
-            H.form H.! method "post" H.! enctype "multipart/form-data" H.! action "/filetype" $ do
-              H.input H.! type_ "file" H.! name "foofile"
-              H.br
-              H.input H.! type_ "submit"
-
-  post "/filetype" $ do
-    fs <- files
-    html $ renderHtml $
-      H.html $ do
-        H.body $ do
-          H.ul $ forM_ fs (\(fName, f) -> H.toHtml (T.decodeUtf8 (fileName f) <> ": " <> T.decodeUtf8 (fileContentType f)))
-
-
-
-
-  post "/upload" $ do
-    fs <- files
-    let [(fName, fileInfo)] = fs
-
-    -- liftIO $ mapM_ print fs
-
-    --if fileContentType fileInfo == "text/docx"
-    --if fileContentType fileInfo == "application/pdf"
-
-    -- if fileContentType fileInfo == "text/docx"
-    --   then text $
-
-    toContentType <- header "Accept"
-    let fromContentType = fileContentType fileInfo
-
-    case toContentType of
-      Nothing -> do
-        status badRequest400
-        text "wat"
-      Just ct -> case (getWriter ct def, getReader fromContentType def) of
-        (Just writer, Just reader) -> do
-          setHeader "Content-Type" ct
-          let content = let pd = runPure $ do
-                              doc <- reader (LB.toStrict $ fileContent fileInfo)
-                              writer doc
-                        in case pd of
-                              Left x -> LB.pack $ show x
-                              Right doc -> doc
-          liftIO $ LB.putStrLn content
-          raw content
-        (_, _) -> text $ "Cannot convert file type \"" <> (LT.decodeUtf8 . LB.fromStrict) fromContentType <> "\" to \"" <> ct
-
--- html $ let pd = runPure $ do
---                 doc <- readDocx def (fileContent fileInfo)
---                 writeHtml5String def doc
---         in case pd of
---                 Left x -> ""
---                 Right doc -> LT.fromStrict doc
--- else text (LT.pack $ show fileInfo)
--- write the files to disk, so they will be served by the static middleware
--- liftIO $ sequence_ [ B.writeFile ("uploads" </> fn) fc | (_,fn,fc) <- fs' ]
--- -- generate list of links to the files just uploaded
--- html $ mconcat [ mconcat [ fName
---                          , ": "
---                          , renderHtml $ H.a (H.toHtml fn) H.! (href $ H.toValue fn) >> H.br
---                          ]
---                | (fName,fn,_) <- fs' ]
-
--- Create an API endpoint(s) that can accept a docx file and convert it to HTML, PDF, and/or Markdown
