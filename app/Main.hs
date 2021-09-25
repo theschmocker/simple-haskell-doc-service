@@ -26,29 +26,33 @@ main = scotty 3000 $ do
     fs <- files
     let [(_, fileInfo)] = fs
 
-    toContentType <- header "Accept"
-    let fromContentType = (LT.decodeUtf8 . LB.fromStrict) $ fileContentType fileInfo
+    acceptHeader <- header "Accept"
+    let fromContentType = (getContentType . LT.decodeUtf8 . LB.fromStrict) $ fileContentType fileInfo
 
-    case toContentType of
+    case getContentType <$> acceptHeader of
       Nothing -> do
         status badRequest400
         text "Missing \"Accept\" header"
-      Just ct -> case convert fromContentType ct (LB.toStrict $ fileContent fileInfo) of
+      Just toContentType -> case convert fromContentType toContentType (LB.toStrict $ fileContent fileInfo) of
         MissingReader -> do
           status badRequest400
-          text $ "Cannot convert from type: " <> fromContentType
+          text $ "Cannot convert from type: " <> fromContentType'
         MissingWriter -> do
           status badRequest400
-          text $ "Cannot convert to type: " <> ct
+          text $ "Cannot convert to type: " <> toContentType'
         MissingBoth -> do
           status badRequest400
-          text $ "Cannot convert files from \"" <> fromContentType <> "\" to \"" <> ct <> "\""
+          text $ "Cannot convert files from \"" <> fromContentType' <> "\" to \"" <> toContentType' <> "\""
         Failure err -> do
           status badRequest400
           text $ "Conversion failed: " <> LT.pack err
         Success contents -> do
-          setHeader "Content-Type" ct
+          setHeader "Content-Type" toContentType'
           raw $ LB.fromStrict contents
+        where
+          packCt = LT.pack . show
+          fromContentType' = packCt fromContentType
+          toContentType' = packCt toContentType
 
 data ConversionResult
   = MissingReader
@@ -57,7 +61,13 @@ data ConversionResult
   | Failure String
   | Success BS.ByteString
 
-convert :: (IsString a, Eq a, IsString b, Eq b) => a -> b -> BS.ByteString -> ConversionResult
+data ContentType a
+  = HTML
+  | Markdown
+  | DocX
+  | Unknown a
+
+convert :: ContentType a -> ContentType b -> BS.ByteString -> ConversionResult
 convert fromCt toCt content = case (maybeReader, maybeWriter) of
   (Nothing, Nothing) -> MissingBoth
   (Nothing, _) -> MissingReader
@@ -71,25 +81,36 @@ convert fromCt toCt content = case (maybeReader, maybeWriter) of
     maybeWriter = getWriter toCt def
     tryConvert reader' writer' content' = runPure $ reader' content' >>= writer'
 
-getReader :: (IsString a, PandocMonad m, Eq a) => a -> ReaderOptions -> Maybe (BS.ByteString -> m Pandoc)
+getReader :: (PandocMonad m) => ContentType a -> ReaderOptions -> Maybe (BS.ByteString -> m Pandoc)
 getReader ct opts = ($ opts) <$> reader
   where
     reader = case ct of
-      "text/docx" -> pure $ mkBSReader readDocx
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> pure $ mkBSReader readDocx
-      "text/markdown" -> pure $ mkTextReader readMarkdown
-      "text/html" -> pure $ mkTextReader readHtml
+      DocX -> pure $ mkBSReader readDocx
+      Markdown -> pure $ mkTextReader readMarkdown
+      HTML -> pure $ mkTextReader readHtml
       _ -> Nothing
     mkTextReader f opts' = f opts' . T.decodeUtf8
     mkBSReader f opts' = f opts' . LB.fromStrict
 
-getWriter :: (PandocMonad m, IsString a, Eq a) => a -> WriterOptions -> Maybe (Pandoc -> m LB.ByteString)
+getWriter :: (PandocMonad m) => ContentType a -> WriterOptions -> Maybe (Pandoc -> m LB.ByteString)
 getWriter ct opts = ($ opts) <$> writer
   where
     writer = case ct of
-      "text/docx" -> pure writeDocx
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> pure writeDocx
-      "text/html" -> pure $ mkTextWriter writeHtml5String
-      "text/markdown" -> pure $ mkTextWriter writeMarkdown
+      DocX -> pure writeDocx
+      HTML -> pure $ mkTextWriter writeHtml5String
+      Markdown -> pure $ mkTextWriter writeMarkdown
       _ -> Nothing
     mkTextWriter f opts' p = LB.encodeUtf8 . LT.fromStrict <$> f opts' p
+
+getContentType :: (IsString a, Eq a) => a -> ContentType a
+getContentType contentType = case contentType of
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> DocX
+  "text/html" -> HTML
+  "text/markdown" -> Markdown
+  _ -> Unknown contentType
+
+instance (Show a) => Show (ContentType a) where
+  show DocX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  show HTML = "text/html"
+  show Markdown = "text/markdown"
+  show (Unknown ct) = show ct
