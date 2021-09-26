@@ -20,7 +20,7 @@ main :: IO ()
 main = scotty 3000 $ do
   middleware logStdoutDev
 
-  post "/convert" $ do
+  post "/" $ do
     fs <- files
     let [(_, fileInfo)] = fs
 
