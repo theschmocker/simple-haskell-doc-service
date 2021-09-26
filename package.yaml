@@ -28,6 +28,10 @@ dependencies:
 
 library:
   source-dirs: src
+  dependencies:
+    - bytestring
+    - pandoc
+    - text
 
 executables:
   docx-api-exe:
@@ -41,9 +45,7 @@ executables:
     - docx-api
     - pandoc
     - scotty
-    - filepath
     - bytestring
-    - blaze-html
     - wai-extra
     - wai-middleware-static
     - transformers
