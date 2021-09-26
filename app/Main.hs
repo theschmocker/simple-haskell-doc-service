@@ -14,6 +14,7 @@ import Prelude ()
 
 import Lib.ContentType
 import Lib.Conversion
+import Text.Printf
 
 main :: IO ()
 main = scotty 3000 $ do
@@ -34,15 +35,13 @@ main = scotty 3000 $ do
         Left err -> do
           status badRequest400
           case err of
-            InternalError message -> text $ "Conversion " <> conversionText <> " failed: " <> LT.pack message
+            InternalError message -> text $ LT.pack $ printf "Conversion %s failed: %s" conversionText message
             UnknownContentTypes types -> do
-              let typesPlural = if length types > 1 then "types" else "type"
-              text $ "Conversion "
-                        <> conversionText
-                        <> " failed. Not sure how to handle "
-                        <> typesPlural
-                        <> ": "
-                        <> LT.intercalate ", " (map showContentType types)
+              let typesPlural = (if length types > 1 then "types" else "type") :: String
+              text $ LT.pack $ printf "Conversion %s failed. Not sure how to handle %s: %s"
+                                      conversionText
+                                      typesPlural
+                                      (LT.intercalate ", " (map showContentType types))
         Right contents -> do
           setHeader "Content-Type" toContentType'
           raw $ LB.fromStrict contents
