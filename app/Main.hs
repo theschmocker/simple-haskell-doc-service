@@ -47,9 +47,8 @@ main = scotty 3000 $ do
           setHeader "Content-Type" toContentType'
           raw $ LB.fromStrict contents
         where
-          packCt = LT.pack . show
-          fromContentType' = packCt fromContentType
-          toContentType' = packCt toContentType
+          fromContentType' = showContentType fromContentType
+          toContentType' = showContentType toContentType
 
 getContentTypeFromFileInfo :: FileInfo c -> ContentType LT.Text
 getContentTypeFromFileInfo = getContentType . LT.decodeUtf8 . LB.fromStrict . fileContentType

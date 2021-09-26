@@ -63,3 +63,6 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - docx-api
+    - base
+    - hspec
+    - text

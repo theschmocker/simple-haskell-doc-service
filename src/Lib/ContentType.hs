@@ -9,6 +9,7 @@ data ContentType a
   | Markdown
   | DocX
   | Unknown a
+  deriving (Eq, Show)
 
 getContentType :: (IsString a, Eq a) => a -> ContentType a
 getContentType contentType = case contentType of
@@ -17,8 +18,8 @@ getContentType contentType = case contentType of
   "text/markdown" -> Markdown
   _ -> Unknown contentType
 
-instance (Show a) => Show (ContentType a) where
-  show DocX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-  show HTML = "text/html"
-  show Markdown = "text/markdown"
-  show (Unknown ct) = show ct
+showContentType :: (IsString a) => ContentType a -> a
+showContentType DocX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+showContentType HTML = "text/html"
+showContentType Markdown = "text/markdown"
+showContentType (Unknown ct) = ct

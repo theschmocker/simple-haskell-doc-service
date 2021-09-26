@@ -17,6 +17,7 @@ data ConversionResult
   | MissingBoth
   | Failure String
   | Success BS.ByteString
+  deriving (Eq, Show)
 
 convert :: ContentType a -> ContentType b -> BS.ByteString -> ConversionResult
 convert fromCt toCt content = case (maybeReader, maybeWriter) of
@@ -39,7 +40,7 @@ getReader ct opts = ($ opts) <$> reader
       DocX -> pure $ mkBSReader readDocx
       Markdown -> pure $ mkTextReader readMarkdown
       HTML -> pure $ mkTextReader readHtml
-      _ -> Nothing
+      Unknown _ -> Nothing
     mkTextReader f opts' = f opts' . T.decodeUtf8
     mkBSReader f opts' = f opts' . LB.fromStrict
 
@@ -50,5 +51,5 @@ getWriter ct opts = ($ opts) <$> writer
       DocX -> pure writeDocx
       HTML -> pure $ mkTextWriter writeHtml5String
       Markdown -> pure $ mkTextWriter writeMarkdown
-      _ -> Nothing
+      Unknown _ -> Nothing
     mkTextWriter f opts' p = LB.encodeUtf8 . LT.fromStrict <$> f opts' p
