@@ -31,24 +31,25 @@ main = scotty 3000 $ do
         status badRequest400
         text "Missing \"Accept\" header"
       Just toContentType -> case convert fromContentType toContentType (LB.toStrict $ fileContent fileInfo) of
-        MissingReader -> do
+        Left err -> do
           status badRequest400
-          text $ "Cannot convert from type: " <> fromContentType'
-        MissingWriter -> do
-          status badRequest400
-          text $ "Cannot convert to type: " <> toContentType'
-        MissingBoth -> do
-          status badRequest400
-          text $ "Cannot convert files from \"" <> fromContentType' <> "\" to \"" <> toContentType' <> "\""
-        Failure err -> do
-          status badRequest400
-          text $ "Conversion failed: " <> LT.pack err
-        Success contents -> do
+          case err of
+            InternalError message -> text $ "Conversion " <> conversionText <> " failed: " <> LT.pack message
+            UnknownContentTypes types -> do
+              let typesPlural = if length types > 1 then "types" else "type"
+              text $ "Conversion "
+                        <> conversionText
+                        <> " failed. Not sure how to handle "
+                        <> typesPlural
+                        <> ": "
+                        <> LT.intercalate ", " (map showContentType types)
+        Right contents -> do
           setHeader "Content-Type" toContentType'
           raw $ LB.fromStrict contents
         where
           fromContentType' = showContentType fromContentType
           toContentType' = showContentType toContentType
+          conversionText = "from \"" <> fromContentType' <> "\" to \"" <> toContentType' <> "\""
 
 getContentTypeFromFileInfo :: FileInfo c -> ContentType LT.Text
 getContentTypeFromFileInfo = getContentType . LT.decodeUtf8 . LB.fromStrict . fileContentType

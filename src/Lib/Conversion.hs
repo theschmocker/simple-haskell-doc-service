@@ -1,33 +1,27 @@
 -- |
-module Lib.Conversion (ConversionResult(..), convert) where
-
-import Lib.ContentType
+module Lib.Conversion (ConversionError (..), convert) where
 
 import qualified Data.ByteString.Char8 as BS
-import Text.Pandoc (Pandoc, ReaderOptions, WriterOptions, def, readDocx, readHtml, readMarkdown, runPure, writeDocx, writeHtml5String, writeMarkdown)
-import Text.Pandoc.Class (PandocMonad)
-import qualified Data.Text.Lazy.Encoding as LB
 import qualified Data.ByteString.Lazy.Char8 as LB
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as LT
+import qualified Data.Text.Lazy.Encoding as LB
+import Lib.ContentType
+import Text.Pandoc (Pandoc, ReaderOptions, WriterOptions, def, readDocx, readHtml, readMarkdown, runPure, writeDocx, writeHtml5String, writeMarkdown)
+import Text.Pandoc.Class (PandocMonad)
 
-data ConversionResult
-  = MissingReader
-  | MissingWriter
-  | MissingBoth
-  | Failure String
-  | Success BS.ByteString
-  deriving (Eq, Show)
+data ConversionError a = UnknownContentTypes [ContentType a] | InternalError String
+  deriving (Show, Eq)
 
-convert :: ContentType a -> ContentType b -> BS.ByteString -> ConversionResult
+convert :: ContentType a -> ContentType a -> BS.ByteString -> Either (ConversionError a) BS.ByteString
 convert fromCt toCt content = case (maybeReader, maybeWriter) of
-  (Nothing, Nothing) -> MissingBoth
-  (Nothing, _) -> MissingReader
-  (_, Nothing) -> MissingWriter
+  (Nothing, Nothing) -> Left $ UnknownContentTypes [fromCt, toCt]
+  (Nothing, _) -> Left $ UnknownContentTypes [fromCt]
+  (_, Nothing) -> Left $ UnknownContentTypes [toCt]
   (Just reader, Just writer) ->
     case tryConvert reader writer content of
-      Left x -> Failure $ show x
-      Right doc -> Success $ LB.toStrict doc
+      Left err -> Left $ InternalError (show err)
+      Right output -> Right $ LB.toStrict output
   where
     maybeReader = getReader fromCt def
     maybeWriter = getWriter toCt def

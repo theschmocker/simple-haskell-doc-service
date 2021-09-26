@@ -3,8 +3,8 @@
 import Control.Monad (forM_)
 import Data.Text (Text, unpack)
 import Lib.ContentType
-import Test.Hspec
 import Lib.Conversion
+import Test.Hspec
 
 main :: IO ()
 main = hspec $ do
@@ -28,21 +28,44 @@ main = hspec $ do
             getContentType shown `shouldBe` c
       )
   describe "convert" $ do
-    it "returns MissingBoth when passed two Unknown ContentTypes" $ do
-      convert (Unknown ("fake" :: Text)) (Unknown ("another/fake" :: Text)) "" `shouldBe` MissingBoth
-    it "returns MissingReader when the first ContentType is Unknown" $ do
-      convert (Unknown ("another/fake" :: Text)) HTML "" `shouldBe` MissingReader
-    it "returns MissingWriter when the second ContentType is Unknown" $ do
-      convert HTML (Unknown ("another/fake" :: Text)) "" `shouldBe` MissingWriter
+    let fakeType1 = Unknown ("fake" :: Text)
+    let fakeType2 = Unknown ("another/fake" :: Text)
+    it "returns both types when passed two Unknown ContentTypes" $ do
+      case convert fakeType1 fakeType2 "" of
+        Right _ -> expectationFailure "Should not be able to convert unknown types"
+        Left err -> case err of
+          InternalError _ -> expectationFailure "Should never attempt to convert unknown types"
+          UnknownContentTypes types -> types `shouldMatchList` [fakeType1, fakeType2]
+    it "returns first type when passed Unknown from content type" $ do
+      case convert fakeType1 HTML "" of
+        Right _ -> expectationFailure "Should not be able to convert unknown types"
+        Left err -> case err of
+          InternalError _ -> expectationFailure "Should never attempt to convert unknown types"
+          UnknownContentTypes types -> types `shouldMatchList` [fakeType1]
+    it "returns second type when passed Unknown to content type" $ do
+      case convert HTML fakeType2 "" of
+        Right _ -> expectationFailure "Should not be able to convert unknown types"
+        Left err -> case err of
+          InternalError _ -> expectationFailure "Should never attempt to convert unknown types"
+          UnknownContentTypes types -> types `shouldMatchList` [fakeType2]
     it "returns Failure when the input content is invalid" $ do
-      conversionResultIsFailure (convert DocX HTML "not a real docx") `shouldBe` True
-    it "returns Success with Markdown -> HTML conversion" $ do
-      convert Markdown HTML "# Test" `shouldBe` Success "<h1>Test</h1>"
-    it "returns Success with HTML -> Markdown conversion" $ do
-      convert HTML Markdown "<h1>Test</h1>" `shouldBe` Success "# Test\n"
-    -- TODO: DocX conversion tests. Should be basic, just to test that the mappings are correct
-    -- Beyond that, assume pandoc does its job
+      case convert DocX HTML "not a real docx" of
+        Right _ -> expectationFailure "Shouldn't return success with invalid input"
+        Left err -> case err of
+          InternalError message -> not (null message) `shouldBe` True
+          UnknownContentTypes _ -> expectationFailure "Content types should be known"
 
-conversionResultIsFailure :: ConversionResult -> Bool
-conversionResultIsFailure (Failure _) = True
-conversionResultIsFailure _ = False
+    --   -- isLeft (convert DocX HTML "not a real docx") `shouldBe` True
+    --   expectationFailure "Ope"
+    it "returns Success with Markdown -> HTML conversion" $ do
+      case convert Markdown HTML "# Test" of
+        Left _ -> expectationFailure "Didn't convert Markdown to HTML"
+        Right output -> output `shouldBe` "<h1>Test</h1>"
+
+    it "returns Success with HTML -> Markdown conversion" $ do
+      case convert HTML Markdown "# Test" of
+        Left _ -> expectationFailure "Didn't convert HTML to Markdown"
+        Right output -> output `shouldBe` "# Test\n"
+
+-- TODO: DocX conversion tests. Should be basic, just to test that the mappings are correct
+-- Beyond that, assume pandoc does its job
